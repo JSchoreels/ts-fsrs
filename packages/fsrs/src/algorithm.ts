@@ -1,5 +1,5 @@
 import { alea } from './alea'
-import { S_MIN } from './constant'
+import { FSRS7_PARAM_LEN, S_MAX, S_MIN } from './constant'
 import { generatorParameters, migrateParameters } from './default'
 import { clamp, get_fuzz_range, roundTo } from './help'
 import {
@@ -9,6 +9,32 @@ import {
   Rating,
 } from './models'
 import type { int } from './types'
+
+const isFsrs7Parameters = (params: number[] | readonly number[]) =>
+  params.length >= FSRS7_PARAM_LEN
+
+const fsrs7_forgetting_curve = (
+  parameters: number[] | readonly number[],
+  elapsed_days: number,
+  stability: number
+) => {
+  const s = Math.max(stability, S_MIN)
+  const tOverS = Math.max(0, elapsed_days) / s
+
+  const decay1 = -parameters[27]
+  const decay2 = -parameters[28]
+  const base1 = parameters[29]
+  const base2 = parameters[30]
+
+  const factor1 = Math.pow(base1, 1 / decay1) - 1
+  const factor2 = Math.pow(base2, 1 / decay2) - 1
+  const r1 = Math.pow(1 + factor1 * tOverS, decay1)
+  const r2 = Math.pow(1 + factor2 * tOverS, decay2)
+
+  const weight1 = parameters[31] * Math.pow(s, -parameters[33])
+  const weight2 = parameters[32] * Math.pow(s, parameters[34])
+  return roundTo((weight1 * r1 + weight2 * r2) / (weight1 + weight2), 8)
+}
 /**
  * $$\text{decay} = -w_{20}$$
  *
@@ -46,6 +72,9 @@ export function forgetting_curve(
   elapsed_days: number,
   stability: number
 ): number {
+  if (typeof decayOrParams !== 'number' && isFsrs7Parameters(decayOrParams)) {
+    return fsrs7_forgetting_curve(decayOrParams, elapsed_days, stability)
+  }
   const { decay, factor } = computeDecayFactor(decayOrParams)
   return roundTo(Math.pow(1 + (factor * elapsed_days) / stability, decay), 8)
 }
@@ -75,6 +104,10 @@ export class FSRSAlgorithm {
 
   set seed(seed: string) {
     this._seed = seed
+  }
+
+  private isFsrs7(): boolean {
+    return isFsrs7Parameters(this.param.w)
   }
 
   /**
@@ -154,7 +187,8 @@ export class FSRSAlgorithm {
    * @return Stability (interval when R=90%)
    */
   init_stability(g: Grade): number {
-    return Math.max(this.param.w[g - 1], 0.1)
+    const floor = this.isFsrs7() ? S_MIN : 0.1
+    return Math.max(this.param.w[g - 1], floor)
   }
 
   /**
@@ -196,6 +230,40 @@ export class FSRSAlgorithm {
    *   @param {number} elapsed_days t days since the last review
    */
   next_interval(s: number, elapsed_days: number): int {
+    if (this.isFsrs7()) {
+      const desiredRetention = clamp(this.param.request_retention, 0.0001, 0.9999)
+      if (desiredRetention >= 0.9999) {
+        return 0
+      }
+
+      const stability = Math.max(s, S_MIN)
+      let low = 0.0
+      let high = Math.max(stability, 1.0)
+
+      while (
+        this.forgetting_curve(high, stability) > desiredRetention &&
+        high < S_MAX
+      ) {
+        high = Math.min(high * 2, S_MAX)
+        if (high === S_MAX) {
+          break
+        }
+      }
+
+      for (let i = 0; i < 50; i++) {
+        const mid = (low + high) / 2
+        const r = this.forgetting_curve(mid, stability)
+        if (r > desiredRetention) {
+          low = mid
+        } else {
+          high = mid
+        }
+      }
+
+      const newInterval = clamp((low + high) / 2, 0, S_MAX)
+      return this.apply_fuzz(newInterval, elapsed_days)
+    }
+
     const newInterval = Math.min(
       Math.max(1, Math.round(s * this.intervalModifier)),
       this.param.maximum_interval
@@ -239,6 +307,55 @@ export class FSRSAlgorithm {
   mean_reversion(init: number, current: number): number {
     const w = this.param.w
     return roundTo(w[7] * init + (1 - w[7]) * current, 8)
+  }
+
+  private fsrs7_mean_reversion(init: number, current: number): number {
+    return roundTo(0.01 * init + 0.99 * current, 8)
+  }
+
+  private fsrs7_next_difficulty(d: number, g: Grade): number {
+    const delta_d = -this.param.w[6] * (g - 3)
+    const next_d = d + this.linear_damping(delta_d, d)
+    return clamp(
+      this.fsrs7_mean_reversion(this.init_difficulty(Rating.Easy), next_d),
+      1,
+      10
+    )
+  }
+
+  private fsrs7_transition_function(delta_t: number): number {
+    const w = this.param.w
+    return 1 - w[26] * Math.exp(-w[25] * delta_t)
+  }
+
+  private fsrs7_stability_for_set(
+    d: number,
+    s: number,
+    r: number,
+    g: Grade,
+    start: number
+  ): number {
+    const w = this.param.w
+    const hardPenalty = g === Rating.Hard ? w[start + 7] : 1
+    const easyBonus = g === Rating.Easy ? w[start + 8] : 1
+
+    const newSFail =
+      w[start + 3] *
+      Math.pow(d, -w[start + 4]) *
+      (Math.pow(s + 1, w[start + 5]) - 1) *
+      Math.exp((1 - r) * w[start + 6])
+    const pls = Math.min(s, newSFail)
+
+    const sinc =
+      Math.exp(w[start] - 1.5) *
+        (11 - d) *
+        Math.pow(s, -w[start + 1]) *
+        (Math.exp((1 - r) * w[start + 2]) - 1) *
+        hardPenalty *
+        easyBonus +
+      1
+    const newSSuccess = Math.max(pls, s * sinc)
+    return g > Rating.Again ? newSSuccess : pls
   }
 
   /**
@@ -363,22 +480,34 @@ export class FSRSAlgorithm {
     const w = this.param.w
     r = typeof r === 'number' ? r : this.forgetting_curve(t, s)
     let new_s: number
-    if (t === 0 && this.param.enable_short_term) {
-      new_s = this.next_short_term_stability(s, g)
-    } else if (g === 1) {
-      const s_after_fail = this.next_forget_stability(d, s, r)
-      let [w_17, w_18] = [0, 0]
-      if (this.param.enable_short_term) {
-        w_17 = w[17]
-        w_18 = w[18]
-      }
-      const next_s_min = s / Math.exp(w_17 * w_18)
-      new_s = clamp(roundTo(next_s_min, 8), S_MIN, s_after_fail)
+    let new_d: number
+    if (this.isFsrs7()) {
+      const newSLongTerm = this.fsrs7_stability_for_set(d, s, r, g, 7)
+      const newSShortTerm = this.fsrs7_stability_for_set(d, s, r, g, 16)
+      const coefficient = this.fsrs7_transition_function(t)
+      new_s = coefficient * newSLongTerm + (1 - coefficient) * newSShortTerm
+      new_d = this.fsrs7_next_difficulty(d, g)
     } else {
-      new_s = this.next_recall_stability(d, s, r, g)
-    }
+      if (t === 0 && this.param.enable_short_term) {
+        new_s = this.next_short_term_stability(s, g)
+      } else if (g === 1) {
+        const s_after_fail = this.next_forget_stability(d, s, r)
+        let [w_17, w_18] = [0, 0]
+        if (this.param.enable_short_term) {
+          w_17 = w[17]
+          w_18 = w[18]
+        }
+        const next_s_min = s / Math.exp(w_17 * w_18)
+        new_s = clamp(roundTo(next_s_min, 8), S_MIN, s_after_fail)
+      } else {
+        new_s = this.next_recall_stability(d, s, r, g)
+      }
 
-    const new_d = this.next_difficulty(d, g)
-    return { difficulty: new_d, stability: new_s }
+      new_d = this.next_difficulty(d, g)
+    }
+    return {
+      difficulty: clamp(roundTo(new_d, 8), 1, 10),
+      stability: clamp(roundTo(new_s, 8), S_MIN, S_MAX),
+    }
   }
 }

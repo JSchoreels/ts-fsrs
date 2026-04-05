@@ -7,6 +7,7 @@ import {
   default_relearning_steps,
   default_request_retention,
   default_w,
+  FSRS7_PARAM_LEN,
   FSRS5_DEFAULT_DECAY,
   W17_W18_Ceiling,
 } from './constant'
@@ -19,6 +20,9 @@ export const clipParameters = (
   numRelearningSteps: number,
   enableShortTerm: boolean = default_enable_short_term
 ) => {
+  if (parameters.length >= FSRS7_PARAM_LEN) {
+    return clipFsrs7Parameters(parameters)
+  }
   let w17_w18_ceiling = W17_W18_Ceiling
   if (Math.max(0, numRelearningSteps) > 1) {
     // PLS = w11 * D ^ -w12 * [(S + 1) ^ w13 - 1] * e ^ (w14 * (1 - R))
@@ -45,6 +49,51 @@ export const clipParameters = (
   )
 }
 
+const clipFsrs7Parameters = (parameters: number[]) => {
+  const w = [...parameters]
+  w[0] = clamp(w[0], 0.001, 50.0)
+  w[1] = clamp(w[1], w[0], 100.0)
+  w[2] = clamp(w[2], w[1], 100.0)
+  w[3] = clamp(w[3], w[2], 100.0)
+
+  w[4] = clamp(w[4], 1.0, 10.0)
+  w[5] = clamp(w[5], 0.001, 4.0)
+  w[6] = clamp(w[6], 0.1, 4.0)
+
+  w[7] = clamp(w[7], 0.0, 4.0)
+  w[8] = clamp(w[8], 0.0, 1.2)
+  w[9] = clamp(w[9], 0.3, 3.0)
+  w[10] = clamp(w[10], 0.01, 1.5)
+  w[11] = clamp(w[11], 0.001, 0.9)
+  w[12] = clamp(w[12], 0.1, 1.0)
+  w[13] = clamp(w[13], 0.0, 3.5)
+  w[14] = clamp(w[14], 0.0, 1.0)
+  w[15] = clamp(w[15], 1.0, 7.0)
+
+  w[16] = clamp(w[16], 0.0, 4.0)
+  w[17] = clamp(w[17], 0.0, 2.0)
+  w[18] = clamp(w[18], 0.5, 6.0)
+  w[19] = clamp(w[19], 0.001, 1.5)
+  w[20] = clamp(w[20], 0.001, 2.0)
+  w[21] = clamp(w[21], 0.001, 1.0)
+  w[22] = clamp(w[22], 0.0, 5.0)
+  w[23] = clamp(w[23], 0.0, 1.0)
+  w[24] = clamp(w[24], 1.0, 7.0)
+
+  w[25] = clamp(w[25], 2.5, 15.0)
+  w[26] = clamp(w[26], 0.0, 1.0)
+
+  w[27] = clamp(w[27], 0.01, 0.25)
+  w[28] = clamp(w[28], w[27], 0.95)
+  w[29] = clamp(w[29], 0.5, 0.85)
+  w[30] = clamp(w[30], w[29], 0.99)
+  w[31] = clamp(w[31], 0.01, 1.0)
+  w[32] = clamp(w[32], 0.1, 1.0)
+  w[33] = clamp(w[33], 0.0, 0.9)
+  w[34] = clamp(w[34], 0.1, 1.1)
+  return w
+}
+
 /**
  * @returns The input if the parameters are valid, throws if they are invalid
  * @example
@@ -62,9 +111,9 @@ export const checkParameters = (parameters: number[] | readonly number[]) => {
   )
   if (invalid !== undefined) {
     throw Error(`Non-finite or NaN value in parameters ${parameters}`)
-  } else if (![17, 19, 21].includes(parameters.length)) {
+  } else if (![17, 19, 21, 35].includes(parameters.length)) {
     throw Error(
-      `Invalid parameter length: ${parameters.length}. Must be 17, 19 or 21 for FSRSv4, 5 and 6 respectively.`
+      `Invalid parameter length: ${parameters.length}. Must be 17, 19, 21 or 35 for FSRSv4, 5, 6 and 7 respectively.`
     )
   }
   return parameters
@@ -79,6 +128,12 @@ export const migrateParameters = (
     return [...default_w]
   }
   switch (parameters.length) {
+    case 35:
+      return clipParameters(
+        Array.from(parameters),
+        numRelearningSteps,
+        enableShortTerm
+      )
     case 21:
       return clipParameters(
         Array.from(parameters),

@@ -14,13 +14,14 @@ export const default_relearning_steps: readonly StepUnit[] = Object.freeze([
   '10m',
 ]) // Relearning->Relearning
 
-export const FSRSVersion: string = `v${version} using FSRS-6.0`
+export const FSRSVersion: string = `v${version} using FSRS-6/7`
 
 export const S_MIN = 0.001
 export const S_MAX = 36500.0
 export const INIT_S_MAX = 100.0
 export const FSRS5_DEFAULT_DECAY = 0.5
 export const FSRS6_DEFAULT_DECAY = 0.1542
+export const FSRS7_PARAM_LEN = 35
 export const default_w = Object.freeze([
   0.212,
   1.2931,
@@ -43,6 +44,13 @@ export const default_w = Object.freeze([
   0.0912,
   0.0658,
   FSRS6_DEFAULT_DECAY,
+]) satisfies readonly number[]
+
+export const default_w_fsrs7 = Object.freeze([
+  0.041, 2.4175, 4.1283, 11.9709, 5.6385, 0.4468, 3.262, 2.3054, 0.1688,
+  1.3325, 0.3524, 0.0049, 0.7503, 0.0896, 0.6625, 1.3, 0.882, 0.3072, 3.5875,
+  0.303, 0.0107, 0.2279, 2.6413, 0.5594, 1.3, 2.5, 1.0, 0.0723, 0.1634, 0.5,
+  0.9555, 0.2245, 0.6232, 0.1362, 0.3862,
 ]) satisfies readonly number[]
 
 export const W17_W18_Ceiling = 2.0
