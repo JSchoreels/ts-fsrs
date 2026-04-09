@@ -101,13 +101,22 @@ export default class LongTermScheduler extends AbstractScheduler {
       hard_interval: int,
       good_interval: int,
       easy_interval: int
-    again_interval = this.algorithm.next_interval(
-      next_again.stability,
-      interval
-    )
-    hard_interval = this.algorithm.next_interval(next_hard.stability, interval)
-    good_interval = this.algorithm.next_interval(next_good.stability, interval)
-    easy_interval = this.algorithm.next_interval(next_easy.stability, interval)
+    again_interval = Math.max(
+      1,
+      Math.round(this.algorithm.next_interval(next_again.stability, interval))
+    ) as int
+    hard_interval = Math.max(
+      1,
+      Math.round(this.algorithm.next_interval(next_hard.stability, interval))
+    ) as int
+    good_interval = Math.max(
+      1,
+      Math.round(this.algorithm.next_interval(next_good.stability, interval))
+    ) as int
+    easy_interval = Math.max(
+      1,
+      Math.round(this.algorithm.next_interval(next_easy.stability, interval))
+    ) as int
 
     again_interval = Math.min(again_interval, hard_interval) as int
     hard_interval = Math.max(hard_interval, again_interval + 1) as int

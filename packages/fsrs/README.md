@@ -202,6 +202,12 @@ console.log(nextInterval)
 
 This is useful for simulations, analytics, or custom scheduling pipelines. For standard review flows, prefer `repeat()` or `next()`.
 
+Behavior notes:
+
+- `next_interval()` returns fractional days for both FSRS-6 and FSRS-7 when fuzz is disabled.
+- FSRS-6 rounds elapsed days in `next_state()` / `forgetting_curve()` to preserve legacy day-based updates.
+- FSRS-7 keeps fractional elapsed-day behavior.
+
 ### History helpers
 
 The scheduler also provides:

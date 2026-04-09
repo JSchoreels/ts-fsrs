@@ -6,6 +6,7 @@ import {
   default_maximum_interval,
   default_request_retention,
   default_w,
+  default_w_fsrs7,
   FSRS,
   FSRS5_DEFAULT_DECAY,
   FSRS6_DEFAULT_DECAY,
@@ -344,7 +345,7 @@ describe('next_interval', () => {
     )
     // https://github.com/open-spaced-repetition/fsrs-rs/blob/78c36e6b21182c5a13f8649eafe2eb62c1dbdabe/src/inference.rs#L852
     // Result differs by +3 days compared to the reference test due to differing numeric precision: fsrs-rs uses f32, while ts-fsrs uses f64
-    expect(intervals).toEqual([
+    expect(intervals.map((x) => Math.max(1, Math.round(x)))).toEqual([
       3116766 + 3,
       34793,
       2508,
@@ -381,6 +382,49 @@ describe('next_interval', () => {
     expect(next_ivl_fuzz).toBeGreaterThanOrEqual(min_ivl)
     expect(max_ivl).toBe(params.maximum_interval)
     expect(next_ivl_fuzz).toBeLessThanOrEqual(max_ivl)
+  })
+
+  it('fsrs6 returns fractional interval at 90% retention', () => {
+    const f = fsrs({
+      w: default_w,
+      request_retention: 0.9,
+      enable_fuzz: false,
+    })
+    expect(f.next_interval(121.01552, 0)).toBeCloseTo(121.01552, 5)
+  })
+
+  it('fsrs7 returns fractional interval', () => {
+    const f = fsrs({
+      w: default_w_fsrs7,
+      request_retention: 0.9,
+      enable_fuzz: false,
+    })
+    expect(f.next_interval(12.345, 0)).not.toEqual(
+      Math.round(f.next_interval(12.345, 0))
+    )
+  })
+})
+
+describe('elapsed-day parity', () => {
+  it('fsrs6 rounds elapsed days in next_state', () => {
+    const f = fsrs({ w: default_w })
+    const state = { stability: 12, difficulty: 5 }
+    const at0 = f.next_state(state, 0.0, Rating.Good)
+    const at049 = f.next_state(state, 0.49, Rating.Good)
+    const at051 = f.next_state(state, 0.51, Rating.Good)
+    const at1 = f.next_state(state, 1.0, Rating.Good)
+
+    expect(at049.stability).toBeCloseTo(at0.stability, 7)
+    expect(at051.stability).toBeCloseTo(at1.stability, 7)
+  })
+
+  it('fsrs7 keeps fractional elapsed days in next_state', () => {
+    const f = fsrs({ w: default_w_fsrs7 })
+    const state = { stability: 12, difficulty: 5 }
+    const at0 = f.next_state(state, 0.0, Rating.Good)
+    const at05 = f.next_state(state, 0.5, Rating.Good)
+
+    expect(Math.abs(at05.stability - at0.stability)).toBeGreaterThan(1e-6)
   })
 })
 

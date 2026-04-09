@@ -13,6 +13,16 @@ import type { int } from './types'
 const isFsrs7Parameters = (params: number[] | readonly number[]) =>
   params.length >= FSRS7_PARAM_LEN
 
+const normalizeElapsedDays = (
+  decayOrParams: number | number[] | readonly number[],
+  elapsed_days: number
+) => {
+  if (typeof decayOrParams !== 'number' && isFsrs7Parameters(decayOrParams)) {
+    return Math.max(0, elapsed_days)
+  }
+  return Math.round(Math.max(0, elapsed_days))
+}
+
 const fsrs7_forgetting_curve = (
   parameters: number[] | readonly number[],
   elapsed_days: number,
@@ -76,7 +86,8 @@ export function forgetting_curve(
     return fsrs7_forgetting_curve(decayOrParams, elapsed_days, stability)
   }
   const { decay, factor } = computeDecayFactor(decayOrParams)
-  return roundTo(Math.pow(1 + (factor * elapsed_days) / stability, decay), 8)
+  const t = normalizeElapsedDays(decayOrParams, elapsed_days)
+  return roundTo(Math.pow(1 + (factor * t) / stability, decay), 8)
 }
 
 /**
@@ -229,9 +240,13 @@ export class FSRSAlgorithm {
    *   @param {number} s - Stability (interval when R=90%)
    *   @param {number} elapsed_days t days since the last review
    */
-  next_interval(s: number, elapsed_days: number): int {
+  next_interval(s: number, elapsed_days: number): number {
     if (this.isFsrs7()) {
-      const desiredRetention = clamp(this.param.request_retention, 0.0001, 0.9999)
+      const desiredRetention = clamp(
+        this.param.request_retention,
+        0.0001,
+        0.9999
+      )
       if (desiredRetention >= 0.9999) {
         return 0
       }
@@ -261,13 +276,20 @@ export class FSRSAlgorithm {
       }
 
       const newInterval = clamp((low + high) / 2, 0, S_MAX)
+      if (!this.param.enable_fuzz) {
+        return newInterval
+      }
       return this.apply_fuzz(newInterval, elapsed_days)
     }
 
-    const newInterval = Math.min(
-      Math.max(1, Math.round(s * this.intervalModifier)),
+    const newInterval = clamp(
+      s * this.intervalModifier,
+      0,
       this.param.maximum_interval
-    ) as int
+    )
+    if (!this.param.enable_fuzz) {
+      return newInterval
+    }
     return this.apply_fuzz(newInterval, elapsed_days)
   }
 
@@ -459,6 +481,9 @@ export class FSRSAlgorithm {
     }
     if (g < 0 || g > 4) {
       throw new Error(`Invalid grade "${g}"`)
+    }
+    if (!this.isFsrs7()) {
+      t = Math.round(Math.max(0, t))
     }
     if (d === 0 && s === 0) {
       return {
